@@ -67,7 +67,7 @@ jobs:
   test:
     name: Test Lambdas
     needs: changes
-    if: needs.changes.outputs.lambdas == 'true'
+    if: needs.changes.outputs.lambdas == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -98,11 +98,11 @@ jobs:
   deploy-lambdas:
     name: Deploy Lambdas
     needs: [changes, test]
-    # Run on push to main only; test must pass if it ran
+    # Run on push to main or manual dispatch; test must pass if it ran
     if: |
-      needs.changes.outputs.lambdas == 'true' &&
+      (needs.changes.outputs.lambdas == 'true' || github.event_name == 'workflow_dispatch') &&
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'push'
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     steps:
@@ -182,9 +182,9 @@ jobs:
     name: Deploy Frontend
     needs: changes
     if: |
-      needs.changes.outputs.frontend == 'true' &&
+      (needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch') &&
       github.ref == 'refs/heads/main' &&
-      github.event_name == 'push'
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
 
     steps:
