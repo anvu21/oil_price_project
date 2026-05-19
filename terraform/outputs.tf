@@ -96,6 +96,11 @@ output "api_invoke_url" {
   value       = module.lambda.api_invoke_url
 }
 
+output "transform_function_name" {
+  description = "Name of the transform Lambda function."
+  value       = module.lambda.transform_function_name
+}
+
 output "api_function_name" {
   description = "Name of the FastAPI Lambda function."
   value       = module.lambda.api_function_name
