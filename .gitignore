@@ -1,0 +1,39 @@
+# Local secrets folder — IAM keys, CSV exports, etc. Never commit.
+_secret/
+
+# Claude Code session data
+.claude/
+
+# Temporary test/debug payloads
+*.json
+!package.json
+!package-lock.json
+
+# Terraform secrets — never commit real values
+terraform/secrets.tfvars
+
+# Lambda build artifacts
+dist/
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Terraform local state and cache (state lives in S3)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# OS
+.DS_Store
+Thumbs.db

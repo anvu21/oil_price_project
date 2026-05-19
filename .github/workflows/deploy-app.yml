@@ -1,0 +1,234 @@
+name: Deploy Application
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lambdas/**'
+      - 'frontend/**'
+      - 'scripts/package_lambda.py'
+      - '.github/workflows/deploy-app.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lambdas/**'
+      - 'frontend/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '20'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Required GitHub repository variables (Settings → Variables → Repository):
+#
+#   LAMBDA_INGEST_NAME          gas-price-prod-ingest
+#   LAMBDA_TRANSFORM_NAME       gas-price-prod-transform
+#   LAMBDA_API_NAME             gas-price-prod-api
+#   FRONTEND_BUCKET             (from: terraform output frontend_bucket)
+#   CLOUDFRONT_DISTRIBUTION_ID  (from: terraform output cloudfront_distribution_id)
+#   API_BASE_URL                (from: terraform output api_invoke_url)
+#   ALERT_EMAIL                 your-email@example.com
+#
+# Required GitHub repository secrets (Settings → Secrets → Repository):
+#
+#   AWS_ACCESS_KEY_ID
+#   AWS_SECRET_ACCESS_KEY
+#   EIA_API_KEY
+#   TF_DB_PASSWORD
+#   TF_REDIS_URL
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  # ── Detect which paths changed ─────────────────────────────────────────────
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      lambdas:  ${{ steps.filter.outputs.lambdas }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            lambdas:
+              - 'lambdas/**'
+              - 'scripts/package_lambda.py'
+            frontend:
+              - 'frontend/**'
+
+  # ── Python tests ───────────────────────────────────────────────────────────
+  test:
+    name: Test Lambdas
+    needs: changes
+    if: needs.changes.outputs.lambdas == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          pip install pytest pytest-cov \
+            fastapi==0.115.0 \
+            pydantic==2.10.6 \
+            sqlalchemy==2.0.36 \
+            redis==5.2.1
+
+      - name: Run tests
+        run: |
+          if [ -d "tests" ] || find lambdas -name "test_*.py" | grep -q .; then
+            pytest lambdas/ -v --tb=short
+          else
+            echo "No tests found — skipping (add tests/ directory to enable)"
+          fi
+
+  # ── Package and deploy all three Lambda functions ──────────────────────────
+  deploy-lambdas:
+    name: Deploy Lambdas
+    needs: [changes, test]
+    # Run on push to main only; test must pass if it ran
+    if: |
+      needs.changes.outputs.lambdas == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Package all Lambdas
+        run: python scripts/package_lambda.py
+
+      # Deploy each Lambda: upload code → wait → publish version → update prod alias
+      - name: Deploy ingest Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ vars.LAMBDA_INGEST_NAME }} \
+            --zip-file fileb://lambdas/ingest/ingest.zip \
+            --no-cli-pager
+          aws lambda wait function-updated \
+            --function-name ${{ vars.LAMBDA_INGEST_NAME }}
+          VERSION=$(aws lambda publish-version \
+            --function-name ${{ vars.LAMBDA_INGEST_NAME }} \
+            --query Version --output text)
+          aws lambda update-alias \
+            --function-name ${{ vars.LAMBDA_INGEST_NAME }} \
+            --name prod \
+            --function-version "$VERSION" \
+            --no-cli-pager
+          echo "ingest → version $VERSION"
+
+      - name: Deploy transform Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ vars.LAMBDA_TRANSFORM_NAME }} \
+            --zip-file fileb://lambdas/transform/transform.zip \
+            --no-cli-pager
+          aws lambda wait function-updated \
+            --function-name ${{ vars.LAMBDA_TRANSFORM_NAME }}
+          VERSION=$(aws lambda publish-version \
+            --function-name ${{ vars.LAMBDA_TRANSFORM_NAME }} \
+            --query Version --output text)
+          aws lambda update-alias \
+            --function-name ${{ vars.LAMBDA_TRANSFORM_NAME }} \
+            --name prod \
+            --function-version "$VERSION" \
+            --no-cli-pager
+          echo "transform → version $VERSION"
+
+      - name: Deploy API Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ vars.LAMBDA_API_NAME }} \
+            --zip-file fileb://lambdas/api/api.zip \
+            --no-cli-pager
+          aws lambda wait function-updated \
+            --function-name ${{ vars.LAMBDA_API_NAME }}
+          VERSION=$(aws lambda publish-version \
+            --function-name ${{ vars.LAMBDA_API_NAME }} \
+            --query Version --output text)
+          aws lambda update-alias \
+            --function-name ${{ vars.LAMBDA_API_NAME }} \
+            --name prod \
+            --function-version "$VERSION" \
+            --no-cli-pager
+          echo "api → version $VERSION"
+
+  # ── Build and deploy the React frontend ───────────────────────────────────
+  deploy-frontend:
+    name: Deploy Frontend
+    needs: changes
+    if: |
+      needs.changes.outputs.frontend == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: ${{ vars.API_BASE_URL }}
+        run: npm run build
+
+      # Hashed assets (JS/CSS) are immutable — cache them for 1 year
+      # index.html must not be cached so users always get the latest entry point
+      - name: Sync to S3
+        run: |
+          aws s3 sync frontend/dist/ s3://${{ vars.FRONTEND_BUCKET }} \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public,max-age=31536000,immutable"
+
+          aws s3 cp frontend/dist/index.html \
+            s3://${{ vars.FRONTEND_BUCKET }}/index.html \
+            --cache-control "public,max-age=0,must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*" \
+            --no-cli-pager

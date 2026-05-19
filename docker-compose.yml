@@ -1,0 +1,101 @@
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 15 — matches the production RDS version
+  # Schema is initialised from scripts/init_db.sql on first startup.
+  # Data is persisted in the 'postgres_data' named volume.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-gas_prices}
+      POSTGRES_USER:     ${POSTGRES_USER:-gas_price_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localpassword}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gas_price_admin} -d ${POSTGRES_DB:-gas_prices}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 — stands in for Upstash Redis in local dev
+  # Redis is fully reachable here (no VPC restrictions), so caching is enabled.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # FastAPI — the API Lambda running via uvicorn (no Mangum/API Gateway needed)
+  # Connects to local Postgres + Redis; skips AWS Secrets Manager entirely.
+  # Hot-reload is enabled (--reload in Dockerfile CMD).
+  #
+  # EIA_API_KEY is read from .env (copy .env.example → .env and fill in).
+  # It is only used when running the backfill script — not at runtime.
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ./lambdas/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT:    local
+      DB_HOST:        postgres
+      DB_NAME:        ${POSTGRES_DB:-gas_prices}
+      DB_USERNAME:    ${POSTGRES_USER:-gas_price_admin}
+      DB_PASSWORD:    ${POSTGRES_PASSWORD:-localpassword}
+      DB_PORT:        "5432"
+      REDIS_URL:      redis://redis:6379
+      REDIS_ENABLED:  "true"
+      # Passed through from .env so `docker compose exec api python scripts/backfill.py`
+      # works without needing --api-key every time.
+      EIA_API_KEY:    ${EIA_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Mount source code for hot-reload (uvicorn --reload watches for changes)
+      - ./lambdas/api:/app
+      # Mount scripts so backfill.py is available inside the container
+      - ./scripts:/scripts:ro
+
+  # ---------------------------------------------------------------------------
+  # React frontend — Vite dev server with HMR
+  # VITE_API_BASE_URL points to the local API container.
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - api
+    volumes:
+      # Mount source for Vite HMR (hot module replacement)
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+
+volumes:
+  postgres_data:
