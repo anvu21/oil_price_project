@@ -41,6 +41,7 @@ jobs:
 
       - name: Package Lambdas
         run: python scripts/package_lambda.py
+        working-directory: ${{ github.workspace }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
