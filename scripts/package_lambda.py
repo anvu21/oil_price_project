@@ -127,7 +127,7 @@ def _package_one(spec: LambdaSpec) -> None:
     zip_path = lambda_dir / spec.zip_name
     requirements = lambda_dir / "requirements.txt"
 
-    print(f"\n[package] ── Packaging {spec.name} Lambda ──────────────────────")
+    print(f"\n[package] -- Packaging {spec.name} Lambda --------------------")
 
     if not requirements.exists():
         print(f"[package] ERROR: {requirements} not found.", file=sys.stderr)

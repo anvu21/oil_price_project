@@ -83,7 +83,7 @@ def _get_secret(secret_arn: str) -> str:
 _CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS prices_weekly (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    state       VARCHAR(2)   NOT NULL,
+    state       VARCHAR(10)  NOT NULL,
     week_start  DATE         NOT NULL,
     avg_price   NUMERIC(5,3) NOT NULL,
     grade       VARCHAR(20)  NOT NULL DEFAULT 'regular',
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS prices_weekly (
 
 CREATE TABLE IF NOT EXISTS prices_monthly (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    state       VARCHAR(2)   NOT NULL,
+    state       VARCHAR(10)  NOT NULL,
     year_month  DATE         NOT NULL,
     avg_price   NUMERIC(5,3) NOT NULL,
     min_price   NUMERIC(5,3) NOT NULL,
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS prices_monthly (
 
 CREATE TABLE IF NOT EXISTS prices_yearly (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    state       VARCHAR(2)   NOT NULL,
+    state       VARCHAR(10)  NOT NULL,
     year        SMALLINT     NOT NULL,
     avg_price   NUMERIC(5,3) NOT NULL,
     min_price   NUMERIC(5,3) NOT NULL,
@@ -121,6 +121,24 @@ CREATE TABLE IF NOT EXISTS ingest_log (
     error_message   TEXT,
     s3_path         TEXT
 );
+"""
+
+# Widen existing VARCHAR(2) state columns created before PADD support was added.
+# PostgreSQL widens VARCHAR without a full table rewrite — instant on any table size.
+_ALTER_COLUMNS_SQL = """
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'prices_weekly'
+          AND column_name = 'state'
+          AND character_maximum_length < 10
+    ) THEN
+        ALTER TABLE prices_weekly  ALTER COLUMN state TYPE VARCHAR(10);
+        ALTER TABLE prices_monthly ALTER COLUMN state TYPE VARCHAR(10);
+        ALTER TABLE prices_yearly  ALTER COLUMN state TYPE VARCHAR(10);
+    END IF;
+END $$;
 """
 
 
@@ -149,6 +167,9 @@ def _ensure_db_initialised(engine: Engine) -> None:
     log(logging.INFO, "db_init_start")
     with engine.begin() as conn:
         conn.execute(text(_CREATE_TABLES_SQL))
+        # Widen state column from VARCHAR(2) → VARCHAR(10) on pre-PADD tables.
+        # The DO block is idempotent — a no-op once columns are already wide enough.
+        conn.execute(text(_ALTER_COLUMNS_SQL))
     _db_initialised = True
     log(logging.INFO, "db_init_complete")
 

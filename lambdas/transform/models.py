@@ -62,12 +62,25 @@ class S3Payload(BaseModel):
     records: list[EIAPriceRecord]
 
 
+# PADD region codes published by EIA for weekly retail gasoline prices.
+# Used as fallback data for the 42 states that lack individual EIA reporting.
+#   R1X = PADD 1A  New England      (CT, ME, NH, RI, VT)
+#   R1Y = PADD 1B  Central Atlantic (DC, DE, MD, NJ, PA)
+#   R1Z = PADD 1C  Lower Atlantic   (GA, NC, SC, VA, WV)
+#   R20 = PADD 2   Midwest          (IL, IN, IA, KS, KY, MI, MO, NE, ND, OK, SD, TN, WI)
+#   R30 = PADD 3   Gulf Coast       (AL, AR, LA, MS, NM)
+#   R40 = PADD 4   Rocky Mountain   (ID, MT, UT, WY)
+#   R50 = PADD 5   West Coast excl. CA & WA (AK, AZ, HI, NV, OR)
+_VALID_PADDS: frozenset[str] = frozenset({"R1X", "R1Y", "R1Z", "R20", "R30", "R40", "R50"})
+
+
 class TransformRecord(BaseModel):
     """
-    Normalised record after filtering out non-state duoarea codes.
+    Normalised record after filtering out non-state / non-PADD duoarea codes.
 
-    EIA state codes: 'SCA' → state='CA', 'STX' → state='TX', etc.
-    Region codes like 'R10', 'R20', and national codes like 'U' are skipped.
+    EIA state codes:  'SCA' → state='CA', 'STX' → state='TX', etc.
+    EIA PADD codes:   'R1X', 'R20', … → stored as-is (3-char key, VARCHAR(10))
+    Everything else:  national 'U', metro areas, aggregated 'R10' → skipped.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -80,17 +93,29 @@ class TransformRecord(BaseModel):
     @classmethod
     def from_eia_record(cls, record: EIAPriceRecord) -> "TransformRecord | None":
         """
-        Return a TransformRecord or None if duoarea is not a state-level code.
+        Return a TransformRecord or None if duoarea is not storable.
 
-        State codes are exactly 3 characters starting with 'S' followed by a
-        2-letter abbreviation. Any other format is a region or national aggregate.
+        Accepts:
+          - State codes  (len==3, starts with 'S') → strip 'S' → 2-char state abbr
+          - PADD codes   (R1X, R1Y, R1Z, R20, R30, R40, R50) → kept as-is
+        Skips everything else (national, metro, broad regional like R10).
         """
         code = record.duoarea
-        if len(code) != 3 or code[0] != "S":
-            return None
-        state = code[1:]  # strip leading 'S' → 'CA', 'TX', etc.
-        return cls(
-            state=state,
-            week_start=date.fromisoformat(record.period),
-            avg_price=record.value,
-        )
+
+        # Individual state code: e.g. 'SCA' → 'CA'
+        if len(code) == 3 and code[0] == "S":
+            return cls(
+                state=code[1:],
+                week_start=date.fromisoformat(record.period),
+                avg_price=record.value,
+            )
+
+        # PADD region code: e.g. 'R1X', 'R20' — kept verbatim
+        if code in _VALID_PADDS:
+            return cls(
+                state=code,
+                week_start=date.fromisoformat(record.period),
+                avg_price=record.value,
+            )
+
+        return None
