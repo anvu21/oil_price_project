@@ -115,7 +115,7 @@ module "monitoring" {
   transform_function_name = module.lambda.transform_function_name
   api_function_name       = module.lambda.api_function_name
 
-  dlq_arn        = module.lambda.dlq_arn
+  dlq_arn         = module.lambda.dlq_arn
   rds_instance_id = module.database.rds_instance_id
   api_gateway_id  = module.lambda.api_gateway_id
 }

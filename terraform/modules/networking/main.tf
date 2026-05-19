@@ -1,5 +1,5 @@
 locals {
-  name_prefix   = "${var.project}-${var.environment}"
+  name_prefix = "${var.project}-${var.environment}"
   # Divide the /16 VPC into 4 equal /18s:
   #   10.0.0.0/18   public  AZ-a
   #   10.0.64.0/18  public  AZ-b
@@ -16,7 +16,7 @@ locals {
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
-  enable_dns_hostnames = true  # required for VPC endpoint private DNS to work
+  enable_dns_hostnames = true # required for VPC endpoint private DNS to work
 
   tags = { Name = "${local.name_prefix}-vpc" }
 }

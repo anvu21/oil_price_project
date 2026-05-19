@@ -251,7 +251,7 @@ resource "aws_lambda_function" "transform" {
   role    = aws_iam_role.transform_lambda.arn
   publish = true
 
-  timeout     = 120  # DB + Redis operations need more headroom than ingest
+  timeout     = 120 # DB + Redis operations need more headroom than ingest
   memory_size = 256
 
   vpc_config {
@@ -377,9 +377,9 @@ resource "aws_lambda_function" "api" {
   handler = "handler.handler"
 
   role    = aws_iam_role.api_lambda.arn
-  publish = true   # creates a new numbered version on every apply — enables rollback
+  publish = true # creates a new numbered version on every apply — enables rollback
 
-  timeout     = 60    # temporarily raised for diagnostics; reduce to 30 once stable
+  timeout     = 60 # temporarily raised for diagnostics; reduce to 30 once stable
   memory_size = 256
 
   # Inside the VPC so it can reach RDS directly over the private subnet.
@@ -403,7 +403,7 @@ resource "aws_lambda_function" "api" {
       # (~75 s) that occurs when SYN packets are silently dropped.
       # To enable: add a NAT Gateway or move the Lambda outside the VPC
       # with an RDS Proxy, then set this to "true".
-      REDIS_ENABLED    = "false"
+      REDIS_ENABLED = "false"
     }
   }
 
@@ -435,7 +435,7 @@ resource "aws_apigatewayv2_api" "main" {
   description   = "HTTP API for the US gas price dashboard."
 
   cors_configuration {
-    allow_origins = ["*"]                               # tightened to CloudFront URL in Phase 6
+    allow_origins = ["*"] # tightened to CloudFront URL in Phase 6
     allow_methods = ["GET", "OPTIONS"]
     allow_headers = ["Content-Type", "Authorization"]
     max_age       = 300

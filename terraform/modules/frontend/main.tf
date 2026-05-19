@@ -43,8 +43,8 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 
 data "aws_iam_policy_document" "frontend_bucket" {
   statement {
-    sid     = "AllowCloudFrontOAC"
-    actions = ["s3:GetObject"]
+    sid       = "AllowCloudFrontOAC"
+    actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.frontend.arn}/*"]
 
     principals {
