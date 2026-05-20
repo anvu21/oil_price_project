@@ -193,8 +193,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          # Do NOT use the built-in cache: npm option here.
+          # setup-node@v4 verifies that ~/.npm already exists before it will
+          # restore the cache; on a fresh runner that directory is absent and
+          # the action throws "Some specified paths were not resolved" and
+          # fails the step before npm ci ever runs.
+          # We manage the cache ourselves with actions/cache below, which
+          # handles a missing cache directory gracefully via restore-keys.
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          # ~/.npm is the global npm cache directory (npm config get cache).
+          # Cache it so npm ci can use --prefer-offline on subsequent runs.
+          path: ~/.npm
+          # Primary key: exact lock-file hash — perfect cache hit restores everything.
+          key: npm-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+          # Fallback: any previous npm cache for this OS.
+          # npm ci will download only what changed since the partial hit.
+          restore-keys: |
+            npm-${{ runner.os }}-
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -205,7 +223,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: frontend
-        run: npm ci
+        # --prefer-offline: use the restored ~/.npm cache; only fetch from
+        # the network for packages that aren't already cached.
+        run: npm ci --prefer-offline
 
       - name: Build
         working-directory: frontend
