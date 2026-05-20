@@ -12,6 +12,9 @@ _secret/
 # Terraform secrets — never commit real values
 terraform/secrets.tfvars
 
+# Node
+node_modules/
+
 # Lambda build artifacts
 dist/
 *.zip
