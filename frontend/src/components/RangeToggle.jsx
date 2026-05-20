@@ -69,8 +69,10 @@ export default function RangeToggle({ range, onChange }) {
               e.target.blur()
             }
           }}
+          style={{ MozAppearance: 'textfield' }}
           className={[
             'w-10 rounded border text-center text-sm py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400',
+            '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none',
             !isPreset
               ? 'bg-slate-600 border-slate-500 text-white'
               : 'bg-transparent border-slate-600 text-slate-300 placeholder-slate-500',

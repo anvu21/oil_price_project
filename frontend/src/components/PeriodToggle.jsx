@@ -15,8 +15,8 @@ export default function PeriodToggle({ period, onChange }) {
             onClick={() => onChange(value)}
             className={
               isActive
-                ? 'px-4 py-2 text-sm font-medium bg-slate-800 text-white focus:outline-none'
-                : 'px-4 py-2 text-sm font-medium bg-white text-slate-700 border-l border-slate-300 first:border-l-0 hover:bg-slate-50 focus:outline-none'
+                ? 'px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium bg-slate-800 text-white focus:outline-none'
+                : 'px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium bg-white text-slate-700 border-l border-slate-300 first:border-l-0 hover:bg-slate-50 focus:outline-none'
             }
           >
             {label}

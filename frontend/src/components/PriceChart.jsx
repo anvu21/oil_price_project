@@ -101,7 +101,7 @@ export default function PriceChart({ statesData, stateNames = {}, nationalData, 
     key === '__national' ? "Nat'l Avg" : (stateNames[key] || key)
 
   return (
-    <ResponsiveContainer width="100%" height={340}>
+    <ResponsiveContainer width="100%" height={typeof window !== 'undefined' && window.innerWidth < 640 ? 240 : 340}>
       <LineChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
         <XAxis
