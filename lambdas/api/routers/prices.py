@@ -357,13 +357,16 @@ def get_compare_prices(
     return result
 
 
-def _query_compare(db, state_list: list, period: str, grade: str, from_date, to_date) -> dict:
-    """Return {state: [PricePoint]} for all requested states."""
-    result: dict[str, list] = {s: [] for s in state_list}
+def _fetch_by_codes(db, codes: list, period: str, grade: str, from_date, to_date) -> dict:
+    """Low-level fetch: query the DB for a list of state/PADD codes and return
+    {code: [PricePoint]}.  No fallback logic — callers handle that."""
+    out: dict[str, list] = {c: [] for c in codes}
+    if not codes:
+        return out
 
     if period == "weekly":
         where  = "WHERE state = ANY(:states) AND grade = :grade"
-        params: dict = {"states": state_list, "grade": grade}
+        params: dict = {"states": codes, "grade": grade}
         if from_date:
             where += " AND week_start >= :from_date"
             params["from_date"] = from_date
@@ -375,11 +378,12 @@ def _query_compare(db, state_list: list, period: str, grade: str, from_date, to_
             FROM prices_weekly {where} ORDER BY state, week_start
         """), params).fetchall()
         for r in rows:
-            result[r.state].append({"date": str(r.date), "avg_price": float(r.avg_price)})
+            if r.state in out:
+                out[r.state].append({"date": str(r.date), "avg_price": float(r.avg_price)})
 
     elif period == "monthly":
         where  = "WHERE state = ANY(:states) AND grade = :grade"
-        params = {"states": state_list, "grade": grade}
+        params = {"states": codes, "grade": grade}
         if from_date:
             where += " AND year_month >= :from_date"
             params["from_date"] = (from_date + "-01")[:10]
@@ -391,11 +395,12 @@ def _query_compare(db, state_list: list, period: str, grade: str, from_date, to_
             FROM prices_monthly {where} ORDER BY state, year_month
         """), params).fetchall()
         for r in rows:
-            result[r.state].append({"date": str(r.date)[:7], "avg_price": float(r.avg_price)})
+            if r.state in out:
+                out[r.state].append({"date": str(r.date)[:7], "avg_price": float(r.avg_price)})
 
     else:  # yearly
         where  = "WHERE state = ANY(:states) AND grade = :grade"
-        params = {"states": state_list, "grade": grade}
+        params = {"states": codes, "grade": grade}
         if from_date:
             where += " AND year >= :from_year"
             params["from_year"] = int(str(from_date)[:4])
@@ -407,7 +412,43 @@ def _query_compare(db, state_list: list, period: str, grade: str, from_date, to_
             FROM prices_yearly {where} ORDER BY state, year
         """), params).fetchall()
         for r in rows:
-            result[r.state].append({"date": str(r.date), "avg_price": float(r.avg_price)})
+            if r.state in out:
+                out[r.state].append({"date": str(r.date), "avg_price": float(r.avg_price)})
+
+    return out
+
+
+def _query_compare(db, state_list: list, period: str, grade: str, from_date, to_date) -> dict:
+    """Return {state: [PricePoint]} for all requested states.
+
+    States with individual EIA series (CA, TX, etc.) are queried directly.
+    States that only have PADD regional data (MT, WY, CT, …) fall back to
+    their region code — mirroring the logic in get_state_prices.
+    """
+    # Pass 1: query all requested state codes directly.
+    direct = _fetch_by_codes(db, state_list, period, grade, from_date, to_date)
+
+    result: dict[str, list] = {}
+    padd_needed: dict[str, list] = {}   # padd_code → [state_abbrs that need it]
+
+    for state in state_list:
+        if direct[state]:
+            result[state] = direct[state]
+        else:
+            padd = STATE_TO_PADD.get(state)
+            if padd:
+                padd_needed.setdefault(padd, []).append(state)
+            else:
+                result[state] = []   # no data, no fallback
+
+    # Pass 2: one query for all distinct PADD codes needed.
+    if padd_needed:
+        padd_data = _fetch_by_codes(
+            db, list(padd_needed.keys()), period, grade, from_date, to_date
+        )
+        for padd, states in padd_needed.items():
+            for state in states:
+                result[state] = padd_data.get(padd, [])
 
     return result
 
