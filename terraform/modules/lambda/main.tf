@@ -445,7 +445,7 @@ resource "aws_apigatewayv2_api" "main" {
   # be kept in sync: API Gateway sends the preflight response; FastAPI sends
   # the header on the actual request.
   cors_configuration {
-    allow_origins = [var.frontend_origin]   # e.g. https://d29v5i05cdp0sg.cloudfront.net
+    allow_origins = [var.frontend_origin] # e.g. https://d29v5i05cdp0sg.cloudfront.net
     allow_methods = ["GET", "OPTIONS"]
     allow_headers = ["Content-Type", "Accept"]
     max_age       = 300
