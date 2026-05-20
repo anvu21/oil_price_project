@@ -404,6 +404,10 @@ resource "aws_lambda_function" "api" {
       # To enable: add a NAT Gateway or move the Lambda outside the VPC
       # with an RDS Proxy, then set this to "true".
       REDIS_ENABLED = "false"
+      # OWASP API7 — CORS origin whitelist. Restricts Access-Control-Allow-Origin
+      # to the CloudFront distribution so other origins cannot make credentialed
+      # cross-origin requests. Update whenever the CloudFront domain changes.
+      ALLOWED_ORIGIN = var.frontend_origin
     }
   }
 
@@ -434,10 +438,16 @@ resource "aws_apigatewayv2_api" "main" {
   protocol_type = "HTTP"
   description   = "HTTP API for the US gas price dashboard."
 
+  # OWASP API7 — Security Misconfiguration:
+  # Restrict the CORS origin to the known CloudFront frontend URL.
+  # This is the API Gateway-level CORS config, which takes precedence over
+  # any CORS headers set inside the Lambda (FastAPI middleware).  Both must
+  # be kept in sync: API Gateway sends the preflight response; FastAPI sends
+  # the header on the actual request.
   cors_configuration {
-    allow_origins = ["*"] # tightened to CloudFront URL in Phase 6
+    allow_origins = [var.frontend_origin]   # e.g. https://d29v5i05cdp0sg.cloudfront.net
     allow_methods = ["GET", "OPTIONS"]
-    allow_headers = ["Content-Type", "Authorization"]
+    allow_headers = ["Content-Type", "Accept"]
     max_age       = 300
   }
 

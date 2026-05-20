@@ -85,6 +85,10 @@ module "lambda" {
   db_username      = var.db_username
   db_secret_arn    = module.database.db_secret_arn
   redis_secret_arn = module.database.redis_secret_arn
+
+  # OWASP API7 — CORS: pass the CloudFront URL so the API restricts
+  # Access-Control-Allow-Origin to the known frontend origin only.
+  frontend_origin = "https://${module.frontend.cloudfront_domain}"
 }
 
 # ---------------------------------------------------------------------------

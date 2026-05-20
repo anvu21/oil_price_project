@@ -4,10 +4,25 @@ Price and state endpoints.
 Route registration order matters — FastAPI matches routes in definition order.
 Static paths (/latest, /national, /compare) must be registered BEFORE the
 parametric path (/{state}) to prevent them being swallowed as state names.
+
+Input validation strategy (OWASP API8 — Injection)
+────────────────────────────────────────────────────
+All user-supplied values are validated before they touch the database:
+
+  state  → whitelist of 51 known abbreviations (_VALID_STATES)
+  period → whitelist of {"weekly", "monthly", "yearly"}
+  grade  → whitelist of {"regular", "midgrade", "premium", "diesel"}
+  from / to → regex + calendar check via _validate_date()
+  states (compare) → each entry whitelist-checked + total count capped
+
+SQLAlchemy parameterized queries (text() + bind params) ensure that even an
+unexpected string that passes validation cannot be injected into SQL.
 """
 from __future__ import annotations
 
 import logging
+import re
+from datetime import date as _date
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Query
@@ -34,6 +49,15 @@ router = APIRouter()
 
 VALID_PERIODS = {"weekly", "monthly", "yearly"}
 VALID_GRADES  = {"regular", "midgrade", "premium", "diesel"}
+
+# Maximum number of states accepted by /compare in a single request.
+# Matches the chart color palette size; keeps DB query cost bounded.
+# OWASP API4 — Lack of Resources & Rate Limiting.
+MAX_COMPARE_STATES = 8
+
+# Regex for an ISO date segment: YYYY-MM-DD or YYYY-MM.
+# Accepted by from= and to= query params on all time-series endpoints.
+_DATE_RE = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12]\d|3[01]))?$")
 
 # ---------------------------------------------------------------------------
 # PADD region mappings
@@ -138,9 +162,16 @@ _VALID_STATES = {s.abbreviation.upper() for s in _STATES}
 
 # ---------------------------------------------------------------------------
 # Validation helpers
+#
+# OWASP API8 — Injection:
+#   All query parameters are validated through one of these helpers before
+#   being used in any database query.  Using whitelists (period, grade, state)
+#   rather than blacklists is the preferred approach — an unexpected value
+#   is rejected by default rather than allowed unless explicitly blocked.
 # ---------------------------------------------------------------------------
 
 def _validate_period(period: str) -> None:
+    """Whitelist-check the period parameter."""
     if period not in VALID_PERIODS:
         raise InvalidPeriodError(
             f"period must be one of: {', '.join(sorted(VALID_PERIODS))}"
@@ -148,6 +179,7 @@ def _validate_period(period: str) -> None:
 
 
 def _validate_grade(grade: str) -> None:
+    """Whitelist-check the grade parameter."""
     if grade not in VALID_GRADES:
         raise InvalidPeriodError(
             f"grade must be one of: {', '.join(sorted(VALID_GRADES))}"
@@ -155,11 +187,49 @@ def _validate_grade(grade: str) -> None:
 
 
 def _validate_state(state: str) -> str:
-    """Normalise to uppercase and validate against the known state list."""
+    """Normalise to uppercase and whitelist-check against the known state list."""
     s = state.upper()
     if s not in _VALID_STATES:
         raise StateNotFoundError(f"Unknown state abbreviation: {state!r}")
     return s
+
+
+def _validate_date(raw: Optional[str], param_name: str) -> Optional[str]:
+    """
+    Validate an optional ISO date string (YYYY-MM-DD or YYYY-MM).
+
+    OWASP API8 — Injection:
+        SQLAlchemy bind parameters already prevent SQL injection, but without
+        this check a malformed string (e.g. "2024-99-99") would propagate to
+        the DB and produce an opaque psycopg2 DataError instead of a clean
+        400.  We also reject strings that are syntactically valid but represent
+        impossible calendar dates (e.g. "2024-02-30").
+
+    Returns the original string unchanged if valid, or None if raw is None.
+    Raises InvalidPeriodError on any format or calendar violation.
+    """
+    if raw is None:
+        return None
+
+    # Step 1: reject anything that doesn't match the expected shape.
+    # This also acts as a length guard — the regex won't match inputs that
+    # are far longer than a real date string.
+    if not _DATE_RE.match(raw):
+        raise InvalidPeriodError(
+            f"'{param_name}' must be YYYY-MM-DD or YYYY-MM, got: {raw!r}"
+        )
+
+    # Step 2: verify the month/day combination is a real calendar date.
+    # fromisoformat() rejects e.g. "2024-02-30" or "2024-13-01".
+    try:
+        normalised = raw if len(raw) == 10 else raw + "-01"
+        _date.fromisoformat(normalised)
+    except ValueError:
+        raise InvalidPeriodError(
+            f"'{param_name}' is not a valid calendar date: {raw!r}"
+        )
+
+    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +318,8 @@ def get_national_prices(
     """National average (mean across all states) for the requested period."""
     _validate_period(period)
     _validate_grade(grade)
+    from_date = _validate_date(from_date, "from")
+    to_date   = _validate_date(to_date,   "to")
 
     cache_key = f"prices:national:{period}:{grade}:{from_date}:{to_date}"
     cached = cache_get(cache_key)
@@ -333,10 +405,33 @@ def get_compare_prices(
     """Side-by-side price series for multiple states."""
     _validate_period(period)
     _validate_grade(grade)
+    from_date = _validate_date(from_date, "from")
+    to_date   = _validate_date(to_date,   "to")
+
+    # OWASP API4 — Lack of Resources & Rate Limiting:
+    #   Cap the raw string length before splitting to block trivially large
+    #   payloads.  Each "XX," segment is 3 chars; 8 states = ~24 chars.
+    #   We allow a small buffer for whitespace, then enforce the count too.
+    if len(states) > 64:
+        raise InvalidPeriodError(
+            f"states parameter is too long (max 64 characters)."
+        )
 
     state_list = [_validate_state(s.strip()) for s in states.split(",") if s.strip()]
+
     if not state_list:
         raise StateNotFoundError("states parameter must contain at least one abbreviation")
+
+    # Deduplicate while preserving order (a user comparing CA,CA,TX is a mistake).
+    seen: set[str] = set()
+    state_list = [s for s in state_list if not (s in seen or seen.add(s))]  # type: ignore[func-returns-value]
+
+    # Hard cap: aligns with the chart color palette and keeps DB cost bounded.
+    if len(state_list) > MAX_COMPARE_STATES:
+        raise InvalidPeriodError(
+            f"At most {MAX_COMPARE_STATES} states can be compared at once; "
+            f"got {len(state_list)}."
+        )
 
     sorted_key  = ",".join(sorted(state_list))
     cache_key   = f"prices:compare:{sorted_key}:{period}:{grade}:{from_date}:{to_date}"
@@ -472,9 +567,11 @@ def get_state_prices(
     includes ``source`` ("state" | "region") and, when regional, ``region_name``
     (e.g. "Midwest (PADD 2)").
     """
-    state = _validate_state(state)
+    state     = _validate_state(state)
     _validate_period(period)
     _validate_grade(grade)
+    from_date = _validate_date(from_date, "from")
+    to_date   = _validate_date(to_date,   "to")
 
     cache_key = f"prices:{state}:{period}:{grade}:{from_date}:{to_date}"
     cached    = cache_get(cache_key)

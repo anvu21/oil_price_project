@@ -91,3 +91,8 @@ variable "redis_secret_arn" {
   description = "ARN of the Secrets Manager secret holding the Upstash Redis URL."
   type        = string
 }
+
+variable "frontend_origin" {
+  description = "CloudFront origin URL injected as ALLOWED_ORIGIN into the API Lambda for CORS (OWASP API7). E.g. https://d29v5i05cdp0sg.cloudfront.net"
+  type        = string
+}
