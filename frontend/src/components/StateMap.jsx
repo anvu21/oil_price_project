@@ -63,8 +63,16 @@ const STATE_TO_PADD = {
   AK:'R50', AZ:'R50', HI:'R50', NV:'R50', OR:'R50',
 }
 
-export default function StateMap({ prices, selectedState, onStateSelect }) {
+/**
+ * Props:
+ *   prices          – latest price array from the API
+ *   selectedStates  – array of state abbreviations to highlight (amber outline)
+ *   onStateSelect   – called with abbr when user clicks a state
+ *   compareMode     – when true, tooltip hints "click to add/remove" instead of "click for history"
+ */
+export default function StateMap({ prices, selectedStates = [], onStateSelect, compareMode = false }) {
   const [tooltip, setTooltip] = useState(null)
+  const selectedSet = useMemo(() => new Set(selectedStates), [selectedStates])
 
   const priceByState = useMemo(() => {
     if (!prices) return {}
@@ -94,11 +102,16 @@ export default function StateMap({ prices, selectedState, onStateSelect }) {
               const fips = geo.id?.toString().padStart(2, '0')
               const abbr = FIPS_TO_ABBR[fips]
               const price = abbr ? priceByState[abbr] : undefined
-              const isSelected = abbr === selectedState
+              const isSelected = abbr ? selectedSet.has(abbr) : false
 
-              const fill    = price != null ? colorScale(price) : '#d1d5db'
+              const choroplethFill = price != null ? colorScale(price) : '#d1d5db'
+              const fill    = isSelected ? '#f59e0b' : choroplethFill   // amber when selected
               const source  = abbr ? sourceByState[abbr] : undefined
               const hasData = price != null
+
+              const actionHint = compareMode
+                ? (isSelected ? 'click to remove' : 'click to add')
+                : 'click for history'
 
               return (
                 <Geography
@@ -115,6 +128,7 @@ export default function StateMap({ prices, selectedState, onStateSelect }) {
                         price,
                         isRegional: source === 'region',
                         regionName: padd ? PADD_NAMES[padd] : null,
+                        actionHint,
                       })
                     }
                   }}
@@ -127,15 +141,15 @@ export default function StateMap({ prices, selectedState, onStateSelect }) {
                   style={{
                     default: {
                       fill,
-                      stroke: '#ffffff',
-                      strokeWidth: 0.6,
+                      stroke: isSelected ? '#b45309' : '#ffffff',
+                      strokeWidth: isSelected ? 2 : 0.6,
                       outline: 'none',
                       cursor: hasData ? 'pointer' : 'default',
                     },
                     hover: {
-                      fill: hasData ? fill : '#d1d5db',
-                      stroke: hasData ? '#1e293b' : '#9ca3af',
-                      strokeWidth: hasData ? 1.5 : 0.6,
+                      fill: hasData ? (isSelected ? '#fbbf24' : choroplethFill) : '#d1d5db',
+                      stroke: hasData ? (isSelected ? '#92400e' : '#1e293b') : '#9ca3af',
+                      strokeWidth: hasData ? (isSelected ? 2.5 : 1.5) : 0.6,
                       outline: 'none',
                       cursor: hasData ? 'pointer' : 'not-allowed',
                       opacity: hasData ? 0.85 : 1,
@@ -184,7 +198,7 @@ export default function StateMap({ prices, selectedState, onStateSelect }) {
           {tooltip.price != null ? (
             <>
               <p className="text-slate-300 text-xs mt-0.5">
-                ${Number(tooltip.price).toFixed(3)}/gal · click for history
+                ${Number(tooltip.price).toFixed(3)}/gal · {tooltip.actionHint}
               </p>
               {tooltip.isRegional && tooltip.regionName && (
                 <p className="text-amber-400 text-xs mt-0.5">

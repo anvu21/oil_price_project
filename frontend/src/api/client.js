@@ -42,3 +42,15 @@ export async function fetchNationalPrices(period = 'weekly', from = null) {
   if (from) params.set('from', from)
   return apiFetch(`/v1/prices/national?${params}`)
 }
+
+/**
+ * Fetch price history for multiple states side-by-side.
+ * Returns: { period, grade, states: { CA: [{date, avg_price}], TX: [...], ... } }
+ * @param {string[]} states  Array of state abbreviations, e.g. ['CA', 'TX', 'FL']
+ * @param {string|null} from ISO date string or null for all history
+ */
+export async function fetchComparePrices(states, period = 'weekly', grade = 'regular', from = null) {
+  const params = new URLSearchParams({ period, grade, states: states.join(',') })
+  if (from) params.set('from', from)
+  return apiFetch(`/v1/prices/compare?${params}`)
+}
