@@ -164,9 +164,14 @@ resource "aws_lambda_alias" "ingest_prod" {
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_event_rule" "ingest_schedule" {
-  name                = "${local.name_prefix}-ingest-schedule"
-  description         = "Triggers the EIA ingest Lambda every Monday at 14:00 UTC."
-  schedule_expression = "cron(0 14 ? * MON *)"
+  name = "${local.name_prefix}-ingest-schedule"
+  # EIA publishes the Weekly Retail Gasoline and Diesel Prices report on Monday
+  # afternoons around 5 pm ET (22:00 UTC). Running at 14:00 UTC (10 am ET) means
+  # the Lambda fires 8 hours before EIA publishes, so it always fetches the
+  # PREVIOUS week's data. Shifted to 23:00 UTC (7 pm ET) — 2-hour buffer after
+  # EIA's typical publish time — so the Lambda reliably gets the current week.
+  description         = "Triggers the EIA ingest Lambda every Monday at 23:00 UTC (7 pm ET), after EIA publishes weekly retail prices (~5 pm ET)."
+  schedule_expression = "cron(0 23 ? * MON *)"
   state               = "ENABLED"
 
   tags = { Name = "${local.name_prefix}-ingest-schedule" }
