@@ -5,6 +5,45 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>US Gas Price Dashboard</title>
+
+    <!--
+      CloudWatch RUM — Real User Monitoring
+      Captures page views, sessions, Web Vitals (LCP/FID/CLS), JS errors,
+      and API call latency from visitors' browsers.
+
+      Resources (managed by Terraform monitoring module):
+        App Monitor : gas-price-prod-frontend
+        Monitor ID  : cdb859df-2c53-45c5-bcf1-bda53ffd40ad
+        Identity Pool: us-east-1:6aee761c-5695-413c-8a0e-698056766fc0  (Cognito unauthenticated)
+        Guest role  : gas-price-prod-rum-unauth-role  (rum:PutRumEvents only)
+
+      The snippet below loads the AWS RUM client asynchronously and does not
+      block page rendering. Visitors are anonymous — no PII is collected.
+    -->
+    <script>
+      (function(n,i,v,r,s,c,x,z){
+        x=window.AwsRumClient={q:[],n:n,i:i,v:v,r:r,c:c};
+        window[n]=function(){x.q.push(arguments)};
+        z=document.createElement('script');
+        z.async=true;
+        z.src=s;
+        document.head.insertBefore(z,document.head.getElementsByTagName('script')[0]);
+      })(
+        'cwr',
+        'cdb859df-2c53-45c5-bcf1-bda53ffd40ad',  // App Monitor ID
+        '1.0.0',
+        'us-east-1',
+        'https://client.rum.us-east-1.amazonaws.com/1.12.0/cwr.js',
+        {
+          sessionSampleRate:  1,         // capture 100% of sessions
+          identityPoolId:     'us-east-1:6aee761c-5695-413c-8a0e-698056766fc0',
+          endpoint:           'https://dataplane.rum.us-east-1.amazonaws.com',
+          telemetries:        ['errors', 'performance', 'http'],
+          allowCookies:       true,      // cross-session user identification
+          enableXRay:         false      // skip distributed tracing to avoid cost
+        }
+      );
+    </script>
   </head>
   <body>
     <div id="root"></div>

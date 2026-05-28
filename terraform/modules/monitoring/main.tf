@@ -6,6 +6,122 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
+# CloudWatch RUM — Real User Monitoring
+#
+# Captures page views, sessions, Web Vitals (LCP/FID/CLS), JS errors, and
+# HTTP request traces from the React frontend running in visitors' browsers.
+#
+# Architecture:
+#   Browser → Cognito Identity Pool (unauthenticated guest role)
+#           → RUM PutRumEvents API → CloudWatch RUM App Monitor
+#
+# The Cognito Identity Pool issues short-lived AWS credentials to anonymous
+# browsers. The guest IAM role restricts those credentials to ONLY the
+# rum:PutRumEvents action on this specific app monitor — no other AWS
+# resources are accessible.
+#
+# Cost: 1M RUM events/month free for 3 months, then $1 per 100k events.
+# At low traffic (~1k sessions/day × ~10 events/session = ~300k events/mo)
+# this stays near free.
+# ---------------------------------------------------------------------------
+
+# Cognito Identity Pool: issues temporary AWS credentials to browser visitors
+# so they can call the RUM PutRumEvents endpoint without an IAM user/key.
+resource "aws_cognito_identity_pool" "rum" {
+  identity_pool_name               = "${local.name_prefix}-rum-identity-pool"
+  allow_unauthenticated_identities = true # browsers are anonymous visitors
+
+  tags = { Name = "${local.name_prefix}-rum-identity-pool" }
+}
+
+# IAM role assumed by unauthenticated Cognito identities (i.e. browser visitors).
+# Trust policy restricts assumption to the specific Cognito pool above.
+resource "aws_iam_role" "rum_unauth" {
+  name        = "${local.name_prefix}-rum-unauth-role"
+  description = "Assumed by anonymous browser visitors via Cognito to send RUM telemetry."
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "CognitoUnauthenticated"
+      Effect = "Allow"
+      Principal = {
+        Federated = "cognito-identity.amazonaws.com"
+      }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        # Scope to this exact identity pool — prevents other pools using this role
+        StringEquals = {
+          "cognito-identity.amazonaws.com:aud" = aws_cognito_identity_pool.rum.id
+        }
+        # Require the unauthenticated flow specifically
+        "ForAnyValue:StringLike" = {
+          "cognito-identity.amazonaws.com:amr" = "unauthenticated"
+        }
+      }
+    }]
+  })
+
+  tags = { Name = "${local.name_prefix}-rum-unauth-role" }
+}
+
+# Inline policy: the ONLY thing a browser visitor can do with these credentials
+# is push RUM events to this specific app monitor. Nothing else.
+resource "aws_iam_role_policy" "rum_unauth_inline" {
+  name = "${local.name_prefix}-rum-unauth-policy"
+  role = aws_iam_role.rum_unauth.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "AllowRumPutEvents"
+      Effect   = "Allow"
+      Action   = ["rum:PutRumEvents"]
+      Resource = aws_rum_app_monitor.frontend.arn
+    }]
+  })
+}
+
+# Attach the unauthenticated role to the Cognito identity pool.
+resource "aws_cognito_identity_pool_roles_attachment" "rum" {
+  identity_pool_id = aws_cognito_identity_pool.rum.id
+  roles = {
+    "unauthenticated" = aws_iam_role.rum_unauth.arn
+  }
+}
+
+# CloudWatch RUM App Monitor — the central resource that receives telemetry.
+resource "aws_rum_app_monitor" "frontend" {
+  name   = "${local.name_prefix}-frontend"
+  domain = var.cloudfront_domain # scopes RUM to this origin only
+
+  app_monitor_configuration {
+    # Anonymous visitors get Cognito credentials from this pool
+    identity_pool_id = aws_cognito_identity_pool.rum.id
+    guest_role_arn   = aws_iam_role.rum_unauth.arn
+
+    # Capture 100% of sessions at current traffic levels.
+    # Reduce to 0.1 (10%) if monthly events approach 1M to stay in free tier.
+    session_sample_rate = 1.0
+
+    # telemetries:
+    #   "errors"      — uncaught JS exceptions and promise rejections
+    #   "performance" — Web Vitals (LCP, FID, CLS, TTFB) + navigation timing
+    #   "http"        — fetch/XHR calls including URL, status, latency
+    telemetries = ["errors", "performance", "http"]
+
+    allow_cookies = true  # enables cross-session user identification
+    enable_xray   = false # X-Ray distributed tracing — skip to avoid added cost
+  }
+
+  custom_events {
+    status = "DISABLED" # enable later if you want to track custom interactions
+  }
+
+  tags = { Name = "${local.name_prefix}-rum-app-monitor" }
+}
+
+# ---------------------------------------------------------------------------
 # SNS topic + email subscription
 # All alarms fire to this topic. The subscription sends an email confirmation
 # on first apply — you must click the link before alerts are delivered.

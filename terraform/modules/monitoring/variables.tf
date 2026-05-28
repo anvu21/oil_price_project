@@ -42,3 +42,8 @@ variable "api_gateway_id" {
   description = "API Gateway HTTP API ID (used as CloudWatch dimension for 5xx alarm)."
   type        = string
 }
+
+variable "cloudfront_domain" {
+  description = "CloudFront distribution domain (e.g. dXXX.cloudfront.net). Used to scope the RUM app monitor to the correct origin."
+  type        = string
+}
