@@ -72,6 +72,7 @@ jobs:
             -var="redis_url=${{ secrets.TF_REDIS_URL }}" \
             -var="eia_api_key=${{ secrets.EIA_API_KEY }}" \
             -var="alert_email=${{ vars.ALERT_EMAIL }}" \
+            -var="worthit_bucket_regional_domain=${{ vars.TF_WORTHIT_BUCKET_DOMAIN }}" \
             -out=tfplan \
             -detailed-exitcode
         # Exit codes: 0 = no changes, 1 = error, 2 = changes present

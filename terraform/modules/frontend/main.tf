@@ -1,5 +1,32 @@
 locals {
-  name_prefix = "${var.project}-${var.environment}"
+  name_prefix     = "${var.project}-${var.environment}"
+  worthit_enabled = var.worthit_bucket_regional_domain != ""
+}
+
+# ---------------------------------------------------------------------------
+# WorthItFood — rewrite directory-style URLs to index.html. The distribution's
+# 403/404 → /index.html fallback would otherwise serve the gas price app.
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudfront_function" "worthit_index" {
+  count   = local.worthit_enabled ? 1 : 0
+  name    = "${local.name_prefix}-worthit-index"
+  runtime = "cloudfront-js-2.0"
+  comment = "Serve /worthit/index.html for /worthit and /worthit/"
+  publish = true
+  code    = <<-EOT
+    function handler(event) {
+      var request = event.request;
+      var uri = request.uri;
+      if (uri === '/worthit') {
+        return { statusCode: 301, statusDescription: 'Moved Permanently', headers: { location: { value: '/worthit/' } } };
+      }
+      if (uri.endsWith('/') || uri.split('/').pop().indexOf('.') === -1) {
+        request.uri = '/worthit/index.html';
+      }
+      return request;
+    }
+  EOT
 }
 
 # ---------------------------------------------------------------------------
@@ -82,6 +109,37 @@ resource "aws_cloudfront_distribution" "frontend" {
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
     origin_id                = "s3-frontend"
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
+  }
+
+  # WorthItFood: its own bucket (so oil's `s3 sync --delete` can never touch it),
+  # reusing this distribution's OAC. Absent unless the bucket domain is provided.
+  dynamic "origin" {
+    for_each = local.worthit_enabled ? [1] : []
+    content {
+      domain_name              = var.worthit_bucket_regional_domain
+      origin_id                = "s3-worthit"
+      origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
+    }
+  }
+
+  dynamic "ordered_cache_behavior" {
+    for_each = local.worthit_enabled ? [1] : []
+    content {
+      path_pattern           = "/worthit*"
+      target_origin_id       = "s3-worthit"
+      viewer_protocol_policy = "redirect-to-https"
+      allowed_methods        = ["GET", "HEAD"]
+      cached_methods         = ["GET", "HEAD"]
+      compress               = true
+
+      # Managed "CachingOptimized" — honours the Cache-Control headers set at upload.
+      cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.worthit_index[0].arn
+      }
+    }
   }
 
   default_cache_behavior {
