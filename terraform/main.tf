@@ -127,3 +127,13 @@ module "monitoring" {
   api_gateway_id    = module.lambda.api_gateway_id
   cloudfront_domain = module.frontend.cloudfront_domain
 }
+
+# ---------------------------------------------------------------------------
+# The RUM guest role already exists in AWS but not in state, so applies fail
+# with EntityAlreadyExists. Safe to remove this block after a successful apply.
+# ---------------------------------------------------------------------------
+
+import {
+  to = module.monitoring.aws_iam_role.rum_unauth
+  id = "gas-price-prod-rum-unauth-role"
+}
