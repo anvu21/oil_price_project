@@ -127,13 +127,3 @@ module "monitoring" {
   api_gateway_id    = module.lambda.api_gateway_id
   cloudfront_domain = module.frontend.cloudfront_domain
 }
-
-# ---------------------------------------------------------------------------
-# The RUM app monitor already exists in AWS but not in state, so applies fail
-# with ConflictException. Safe to remove this block after a successful apply.
-# ---------------------------------------------------------------------------
-
-import {
-  to = module.monitoring.aws_rum_app_monitor.frontend
-  id = "gas-price-prod-frontend"
-}
