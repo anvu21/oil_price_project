@@ -129,11 +129,11 @@ module "monitoring" {
 }
 
 # ---------------------------------------------------------------------------
-# The RUM guest role already exists in AWS but not in state, so applies fail
-# with EntityAlreadyExists. Safe to remove this block after a successful apply.
+# The RUM app monitor already exists in AWS but not in state, so applies fail
+# with ConflictException. Safe to remove this block after a successful apply.
 # ---------------------------------------------------------------------------
 
 import {
-  to = module.monitoring.aws_iam_role.rum_unauth
-  id = "gas-price-prod-rum-unauth-role"
+  to = module.monitoring.aws_rum_app_monitor.frontend
+  id = "gas-price-prod-frontend"
 }
