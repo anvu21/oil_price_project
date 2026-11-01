@@ -67,3 +67,9 @@ variable "eia_api_key" {
   type        = string
   sensitive   = true
 }
+
+variable "worthit_bucket_regional_domain" {
+  description = "WorthItFood site bucket regional domain (output of the WorthItFood Terraform). Empty = no /worthit route."
+  type        = string
+  default     = ""
+}

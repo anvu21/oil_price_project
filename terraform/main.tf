@@ -102,6 +102,9 @@ module "frontend" {
   environment = var.environment
 
   api_invoke_url = module.lambda.api_invoke_url
+
+  # Second site (separate repo/bucket) served at /worthit/ on this distribution.
+  worthit_bucket_regional_domain = var.worthit_bucket_regional_domain
 }
 
 # ---------------------------------------------------------------------------
